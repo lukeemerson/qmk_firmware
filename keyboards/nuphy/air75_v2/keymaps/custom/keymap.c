@@ -22,24 +22,65 @@ void set_left_rgb(uint8_t r, uint8_t g, uint8_t b);
 void set_right_rgb(uint8_t r, uint8_t g, uint8_t b);
 extern bool f_bat_hold;
 
+extern DEV_INFO_STRUCT dev_info;
+
+enum user_keycodes {
+    TG_GAME = QK_USER_0, // Fn+G: off -> Factorio -> Valheim -> off
+    TG_NGHT,             // Fn+N: night base
+    TG_WPM,              // Fn+W: WPM heat
+};
+
+enum { GAME_OFF, GAME_FACTORIO, GAME_VALHEIM };
+
+static uint8_t  game;
+static bool     night, wpm_heat, wispr_sweep;
+static uint16_t mod_time, wispr_time;
+
 // typing: mint ripples from each keypress on a dark board
 void keyboard_post_init_user(void) {
     rgb_matrix_mode_noeeprom(RGB_MATRIX_SOLID_REACTIVE_MULTIWIDE);
     rgb_matrix_sethsv_noeeprom(120, 220, rgb_matrix_get_val());
 }
 
-// side lights: dark while typing, violet for nav, red for Fn
+// games turn the Caps nav layer off
+layer_state_t layer_state_set_user(layer_state_t state) {
+    if (game) state &= ~((layer_state_t)1 << 5);
+    return state;
+}
+
+// mint -> orange -> hot pink as typing speeds up
+static uint8_t wpm_hue(uint8_t heat) {
+    if (heat < 140) return 120 - 100 * heat / 140;
+    return 20 - 42 * (heat - 140) / 115;
+}
+
+static uint8_t wpm_heat_level(void) {
+    uint8_t wpm = get_current_wpm();
+    if (wpm <= 30) return 0;
+    if (wpm >= 120) return 255;
+    return (wpm - 30) * 255 / 90;
+}
+
+// rails: Wispr pink > layer (violet nav, red Fn) > WPM heat > game > off
 void side_led_show_user(void) {
     uint8_t r = 0x00, g = 0x00, b = 0x00;
+    uint8_t layer = get_highest_layer(layer_state);
 
-    switch (get_highest_layer(layer_state)) {
-        case 5:
-            r = 0x90; g = 0x00; b = 0xFF;
-            break;
-        case 1:
-        case 3:
-            r = 0xFF; g = 0x00; b = 0x00;
-            break;
+    if (get_mods() & MOD_BIT(KC_RALT)) {
+        uint8_t br = 90 + scale8(165, sin8(timer_read() / 6));
+        r = br; g = scale8(20, br); b = scale8(147, br);
+    } else if (layer == 5) {
+        r = 0x90; g = 0x00; b = 0xFF;
+    } else if (layer == 1 || layer == 3) {
+        r = 0xFF; g = 0x00; b = 0x00;
+    } else if (wpm_heat && !game) {
+        uint8_t heat = wpm_heat_level();
+        RGB     c    = hsv_to_rgb((HSV){wpm_hue(heat), 255, 64 + scale8(191, heat)});
+        r = c.r; g = c.g; b = c.b;
+    } else if (game == GAME_FACTORIO) {
+        r = 0x80; g = 0x3D; b = 0x00;
+    } else if (game == GAME_VALHEIM) {
+        r = 0x73; g = 0x09; b = 0x42;
     }
 
     set_left_rgb(r, g, b);
@@ -58,7 +99,30 @@ static splash_t splashes[SPLASH_MAX];
 static uint8_t  splash_next;
 
 bool process_record_user(uint16_t keycode, keyrecord_t *record) {
-    if (!record->event.pressed) return true;
+    if (!record->event.pressed) {
+        if (keycode == KC_RALT) {
+            wispr_sweep = true;
+            wispr_time  = timer_read();
+        }
+        return true;
+    }
+
+    switch (keycode) {
+        case TG_GAME:
+            game = (game + 1) % 3;
+            return false;
+        case TG_NGHT:
+            night = !night;
+            return false;
+        case TG_WPM:
+            wpm_heat = !wpm_heat;
+            return false;
+        case KC_LGUI:
+        case KC_RGUI:
+        case KC_LALT:
+            mod_time = timer_read();
+            break;
+    }
 
     uint8_t size = 0;
     switch (keycode) {
@@ -83,16 +147,117 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
     return true;
 }
 
+// light every key whose Mac base keycode is in the list
+static void paint(const uint16_t *kcs, uint8_t n, uint8_t r, uint8_t g, uint8_t b) {
+    for (uint8_t row = 0; row < MATRIX_ROWS; row++) {
+        for (uint8_t col = 0; col < MATRIX_COLS; col++) {
+            uint8_t led = g_led_config.matrix_co[row][col];
+            if (led == NO_LED) continue;
+            uint16_t kc = keymap_key_to_keycode(0, (keypos_t){.row = row, .col = col});
+            for (uint8_t i = 0; i < n; i++) {
+                if (kc == kcs[i]) rgb_matrix_set_color(led, r, g, b);
+            }
+        }
+    }
+}
+#define PAINT(kcs, r, g, b) paint(kcs, ARRAY_SIZE(kcs), r, g, b)
+
+// light every key that does something on a layer
+static void legend(uint8_t layer, uint8_t r, uint8_t g, uint8_t b) {
+    rgb_matrix_set_color_all(0, 0, 0);
+    for (uint8_t row = 0; row < MATRIX_ROWS; row++) {
+        for (uint8_t col = 0; col < MATRIX_COLS; col++) {
+            uint8_t led = g_led_config.matrix_co[row][col];
+            if (led == NO_LED) continue;
+            if (keymap_key_to_keycode(layer, (keypos_t){.row = row, .col = col}) != KC_TRNS) rgb_matrix_set_color(led, r, g, b);
+        }
+    }
+}
+
+static const uint16_t wasd[]     = {KC_W, KC_A, KC_S, KC_D};
+static const uint16_t numrow[]   = {KC_1, KC_2, KC_3, KC_4, KC_5, KC_6, KC_7, KC_8, KC_9, KC_0};
+static const uint16_t cmd_keys[] = {KC_Q, KC_W, KC_E, KC_R, KC_T, KC_A, KC_S, KC_F, KC_Z, KC_X, KC_C, KC_V, KC_N};
+static const uint16_t opt_keys[] = {KC_LEFT, KC_RGHT, KC_UP, KC_DOWN, KC_BSPC, KC_DEL};
+
+// Factorio defaults plus your config.ini: ` rotate quickbars, L lane (mod)
+static const uint16_t fac_build[] = {KC_E, KC_Q, KC_R, KC_T, KC_M, KC_Z, KC_F, KC_GRV, KC_L};
+static const uint16_t fac_mods[]  = {KC_LSFT, KC_LCTL, KC_SPC};
+
+// Valheim from its plist
+static const uint16_t val_move[] = {KC_SPC, KC_LSFT, KC_LCTL, KC_Q, KC_C};
+static const uint16_t val_act[]  = {KC_E, KC_TAB, KC_R, KC_F, KC_G, KC_V, KC_X, KC_M, KC_LBRC, KC_LGUI};
+static const uint16_t val_bar[]  = {KC_1, KC_2, KC_3, KC_4, KC_5, KC_6, KC_7, KC_8};
+
 bool rgb_matrix_indicators_user(void) {
     static const uint8_t reach[] = {0, 25, 60, 160};
-    static const uint8_t wasd[][2] = {{2, 2}, {3, 1}, {3, 2}, {3, 3}};
+    static uint8_t       hue     = 120;
+    uint8_t              mods    = get_mods();
+    uint8_t              layer   = get_highest_layer(layer_state);
 
-    // WASD: low red so they're findable in the dark, while Fn+\ battery display is on
-    for (uint8_t k = 0; f_bat_hold && k < 4; k++) {
-        uint8_t led = g_led_config.matrix_co[wasd[k][0]][wasd[k][1]];
-        if (led != NO_LED) rgb_matrix_set_color(led, 0x30, 0x00, 0x00);
+    // WPM heat retints the ripples
+    uint8_t want = (wpm_heat && !game) ? wpm_hue(wpm_heat_level()) : 120;
+    if (want != hue) {
+        hue = want;
+        rgb_matrix_sethsv_noeeprom(hue, 220, rgb_matrix_get_val());
     }
 
+    // base: games and night replace the ripples
+    if (game == GAME_FACTORIO) {
+        rgb_matrix_set_color_all(0, 0, 0);
+        PAINT(numrow, 0x59, 0x2B, 0x00);
+        PAINT(fac_build, 0x66, 0x08, 0x3B);
+        PAINT(fac_mods, 0x1F, 0x0F, 0x00);
+        PAINT(wasd, 0x30, 0x00, 0x00);
+    } else if (game == GAME_VALHEIM) {
+        rgb_matrix_set_color_all(0, 0, 0);
+        PAINT(val_bar, 0x26, 0x12, 0x00);
+        PAINT(val_move, 0x59, 0x2B, 0x00);
+        PAINT(val_act, 0x66, 0x08, 0x3B);
+        PAINT(wasd, 0x30, 0x00, 0x00);
+    } else if (night) {
+        static const uint16_t homing[] = {KC_F, KC_J};
+        rgb_matrix_set_color_all(0x0D, 0x06, 0x02);
+        PAINT(homing, 0x33, 0x18, 0x08);
+    }
+
+    // Fn+\ battery: number row gauge red -> green, WASD low red
+    if (f_bat_hold) {
+        uint8_t lit = (dev_info.rf_baterry + 5) / 10;
+        for (uint8_t i = 0; i < 10 && i < lit; i++) {
+            paint(&numrow[i], 1, 0x80 - i * 0x6C / 9, 0x0F + i * 0x64 / 9, 0x00 + i * 0x1E / 9);
+        }
+        PAINT(wasd, 0x30, 0x00, 0x00);
+    }
+
+    // Wispr: hold R Opt to dictate, mint sweep on release
+    if (mods & MOD_BIT(KC_RALT)) {
+        static const uint16_t ropt[] = {KC_RALT};
+        rgb_matrix_set_color_all(0x01, 0x05, 0x04);
+        PAINT(ropt, 0x99, 0x0C, 0x58);
+    } else if (wispr_sweep) {
+        uint16_t elapsed = timer_elapsed(wispr_time);
+        if (elapsed >= 600) {
+            wispr_sweep = false;
+        } else {
+            int16_t sx = (int32_t)elapsed * 170 / 600 - 10;
+            for (uint8_t i = 0; i < RGB_MATRIX_LED_COUNT; i++) {
+                int16_t d = abs(g_led_config.point[i].x - sx);
+                if (d < 14) rgb_matrix_set_color(i, 0x12 * (14 - d) / 14, 0x80 * (14 - d) / 14, 0x6A * (14 - d) / 14);
+            }
+        }
+    }
+
+    // mod legend: Cmd or left Opt held past 0.3 s (off in games)
+    if (!game && timer_elapsed(mod_time) > 300) {
+        if (mods & MOD_MASK_GUI) PAINT(cmd_keys, 0x48, 0x4E, 0x59);
+        else if (mods & MOD_BIT(KC_LALT)) PAINT(opt_keys, 0x10, 0x70, 0x5D);
+    }
+
+    // layer legend: only the keys that do something on the held layer
+    if (layer == 5) legend(5, 0x48, 0x00, 0x80);
+    if (layer == 1 || layer == 3) legend(layer, 0x80, 0x00, 0x00);
+
+    // splashes, amber and a third as strong at night
     for (uint8_t s = 0; s < SPLASH_MAX; s++) {
         splash_t *sp = &splashes[s];
         if (!sp->size) continue;
@@ -113,8 +278,9 @@ bool rgb_matrix_indicators_user(void) {
             int16_t ring = abs(sqrt16(dx * dx + dy * dy) - radius);
             if (ring >= 12) continue;
 
-            HSV hsv = {120, 220, (uint16_t)rgb_matrix_get_val() * fade / 255 * (12 - ring) / 12};
-            RGB rgb = hsv_to_rgb(hsv);
+            uint8_t v   = (uint16_t)rgb_matrix_get_val() * fade / 255 * (12 - ring) / 12;
+            HSV     hsv = night && !game ? (HSV){20, 230, v / 3} : (HSV){hue, 220, v};
+            RGB     rgb = hsv_to_rgb(hsv);
             rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
         }
     }
@@ -136,9 +302,9 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
 [1] = LAYOUT_ansi_84(
 	_______, 	KC_F1,  	KC_F2,  	KC_F3, 		KC_F4,  	KC_F5,  	KC_F6,  	KC_F7,  	KC_F8,  	KC_F9, 		KC_F10, 	KC_F11, 	KC_F12, 	MAC_PRT,	_______,	_______,
 	_______, 	LNK_BLE1,  	LNK_BLE2,  	LNK_BLE3,  	LNK_RF,   	_______,   	_______,   	_______,   	_______,   	_______,  	_______,   	_______,	_______, 				_______,	_______,
-	_______, 	_______,   	_______,   	_______,  	_______,   	_______,   	_______,   	_______,   	_______,   	_______,  	_______,   	DEV_RESET,	SLEEP_MODE, 			BAT_SHOW,	_______,
-	_______,	_______,   	_______,   	_______,  	_______,   	_______,   	_______,	_______,   	_______,   	_______,  	_______,	_______, 	 						_______,	_______,
-	_______,				_______,   	_______,   	RGB_TEST,  	_______,   	BAT_NUM,   	_______,	MO(4), 		RGB_SPD,	RGB_SPI,	_______,				_______,	RGB_VAI,	_______,
+	_______, 	_______,   	TG_WPM ,   	_______,  	_______,   	_______,   	_______,   	_______,   	_______,   	_______,  	_______,   	DEV_RESET,	SLEEP_MODE, 			BAT_SHOW,	_______,
+	_______,	_______,   	_______,   	_______,  	_______,   	TG_GAME,   	_______,	_______,   	_______,   	_______,  	_______,	_______, 	 						_______,	_______,
+	_______,				_______,   	_______,   	RGB_TEST,  	_______,   	BAT_NUM,   	TG_NGHT,	MO(4), 		RGB_SPD,	RGB_SPI,	_______,				_______,	RGB_VAI,	_______,
 	_______,	_______,	_______,										_______, 							_______,	MO(1),   	_______,				RGB_MOD,	RGB_VAD,    RGB_HUI),
 
 // layer win
