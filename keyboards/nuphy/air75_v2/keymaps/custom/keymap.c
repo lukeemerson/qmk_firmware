@@ -17,6 +17,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include QMK_KEYBOARD_H
 #include "lib/lib8tion/lib8tion.h"
+#include "leader_codes.h"
 
 void set_left_rgb(uint8_t r, uint8_t g, uint8_t b);
 void set_right_rgb(uint8_t r, uint8_t g, uint8_t b);
@@ -140,6 +141,41 @@ static struct {
 } ink[INK_MAX];
 static uint8_t ink_next;
 
+// leader: tap Right Cmd sends Hyper+Space (Better Aliases' Expand Alias), then the
+// board lights only the keys that continue a code until one is left
+#define LEADER_KEY RGUI_T(KC_F13)
+
+static bool     leader_on;
+static char     leader_buf[8];
+static uint8_t  leader_len;
+static uint32_t leader_time;
+
+static char leader_char(uint16_t kc, bool shift) {
+    if (kc >= KC_A && kc <= KC_Z) return (shift ? 'A' : 'a') + kc - KC_A;
+    if (kc >= KC_1 && kc <= KC_9) return '1' + kc - KC_1;
+    if (kc == KC_0) return '0';
+    if (kc == KC_COMM) return ',';
+    if (kc == KC_DOT) return '.';
+    return 0;
+}
+
+// codes starting with what's typed (plus next, if given); a leading , means paste
+static uint8_t leader_matches(char next) {
+    const char *typed = leader_buf;
+    uint8_t     len   = leader_len;
+    if (len && typed[0] == ',') {
+        typed++;
+        len--;
+    }
+    uint8_t n = 0;
+    for (uint8_t i = 0; i < ARRAY_SIZE(leader_codes); i++) {
+        if (strncmp(leader_codes[i], typed, len) != 0) continue;
+        if (next && leader_codes[i][len] != next) continue;
+        n++;
+    }
+    return n;
+}
+
 // base: each pressed key flashes dark orange and fades over 500 ms, no background
 #define RIPPLE_MAX 16
 
@@ -196,6 +232,8 @@ void side_led_show_user(void) {
     if (get_mods() & MOD_BIT(KC_RALT)) {
         uint8_t br = 90 + scale8(165, sin8(timer_read() / 6));
         r = br; g = scale8(20, br); b = scale8(147, br);
+    } else if (leader_on) {
+        r = 0xBF; g = 0x8A; b = 0x00;
     } else if (layer == 5) {
         r = 0x90; g = 0x00; b = 0xFF;
     } else if (layer == 1 || layer == 3) {
@@ -251,7 +289,31 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
         return true;
     }
 
+    // leader: follow the code as it's typed; modifiers pass, anything else ends it
+    if (leader_on && keycode != LEADER_KEY && !(keycode >= KC_LCTL && keycode <= KC_RGUI)) {
+        char c = leader_char(keycode, get_mods() & MOD_MASK_SHIFT);
+        if (keycode == KC_BSPC && leader_len) {
+            leader_len--;
+        } else if (c && leader_len < sizeof(leader_buf)) {
+            leader_buf[leader_len++] = c;
+            if (!(leader_len == 1 && c == ',') && leader_matches(0) <= 1) leader_on = false;
+        } else {
+            leader_on = false;
+        }
+        leader_time = timer_read32();
+    }
+
     switch (keycode) {
+        case LEADER_KEY:
+            if (record->tap.count) {
+                tap_code16(HYPR(KC_SPC));
+                leader_on   = true;
+                leader_len  = 0;
+                leader_time = timer_read32();
+                return false;
+            }
+            mod_time = timer_read();
+            break;
         case TG_GAME:
             game = (game + 1) % 3;
             return false;
@@ -477,6 +539,25 @@ bool rgb_matrix_indicators_user(void) {
         else if (mods & MOD_BIT(KC_LALT)) PAINT(opt_keys, 0x10, 0x70, 0x5D);
     }
 
+    // leader legend: gold on keys that continue a code, comma dimmer as "paste"
+    if (leader_on && timer_elapsed32(leader_time) > 3000) leader_on = false;
+    if (leader_on) {
+        rgb_matrix_set_color_all(0, 0, 0);
+        for (uint8_t row = 0; row < MATRIX_ROWS; row++) {
+            for (uint8_t col = 0; col < MATRIX_COLS; col++) {
+                uint8_t led = g_led_config.matrix_co[row][col];
+                if (led == NO_LED) continue;
+                uint16_t kc    = keymap_key_to_keycode(0, (keypos_t){.row = row, .col = col});
+                char     lower = leader_char(kc, false), upper = leader_char(kc, true);
+                if (lower == ',' && leader_len == 0) {
+                    rgb_matrix_set_color(led, 0x60, 0x45, 0x00);
+                } else if ((lower && leader_matches(lower)) || (upper != lower && leader_matches(upper))) {
+                    rgb_matrix_set_color(led, 0xBF, 0x8A, 0x00);
+                }
+            }
+        }
+    }
+
     // layer legend: only the keys that do something on the held layer
     if (layer == 5) legend(5, 0x48, 0x00, 0x80);
     if (layer == 1 || layer == 3) legend(layer, 0x80, 0x00, 0x00);
@@ -520,7 +601,7 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
 	KC_TAB, 	KC_Q,   	KC_W,   	KC_E,  		KC_R,   	KC_T,   	KC_Y,   	KC_U,   	KC_I,   	KC_O,  		KC_P,   	KC_LBRC,	KC_RBRC, 				KC_BSLS,	KC_RALT,
 	LT(5, KC_ESC),	KC_A,   	KC_S,   	KC_D,  		KC_F,   	KC_G,   	KC_H,   	KC_J,   	KC_K,   	KC_L,  		KC_SCLN,	KC_QUOT, 	 						KC_ENT,		KC_HOME,
 	KC_LSFT,				KC_Z,   	KC_X,   	KC_C,  		KC_V,   	KC_B,   	KC_N,   	KC_M,   	KC_COMM,	KC_DOT,		KC_SLSH,				KC_RSFT,	KC_UP,		KC_END,
-	KC_LCTL,	KC_LALT,	KC_LGUI,										KC_SPC, 							KC_RGUI,	MO(1),   	KC_RCTL,				KC_LEFT,	KC_DOWN,    KC_RGHT),
+	KC_LCTL,	KC_LALT,	KC_LGUI,										KC_SPC, 							LEADER_KEY,	MO(1),   	KC_RCTL,				KC_LEFT,	KC_DOWN,    KC_RGHT),
 
 // layer Mac Fn
 [1] = LAYOUT_ansi_84(
