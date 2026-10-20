@@ -140,7 +140,7 @@ static struct {
 } ink[INK_MAX];
 static uint8_t ink_next;
 
-// base ripples: every keypress, drawn softly over the amber glow
+// base: each pressed key flashes dark orange and fades over 500 ms, no background
 #define RIPPLE_MAX 16
 
 static struct {
@@ -150,25 +150,16 @@ static struct {
 static uint8_t  ripple_next;
 static uint32_t last_press;
 
-static void base_ripple(uint8_t hue) {
-    for (uint8_t i = 0; i < RGB_MATRIX_LED_COUNT; i++) {
-        uint16_t v = 0;
-        for (uint8_t r = 0; r < RIPPLE_MAX; r++) {
-            if (!ripples[r].led1) continue;
-            uint16_t age = timer_elapsed(ripples[r].time);
-            if (age >= 510) {
-                ripples[r].led1 = 0;
-                continue;
-            }
-            uint8_t  p      = ripples[r].led1 - 1;
-            int16_t  dx     = g_led_config.point[i].x - g_led_config.point[p].x;
-            int16_t  dy     = g_led_config.point[i].y - g_led_config.point[p].y;
-            uint16_t effect = age / 2 + sqrt16(dx * dx + dy * dy) * 5;
-            if (effect < 255) v += 255 - effect;
+static void base_flash(uint8_t hue) {
+    for (uint8_t r = 0; r < RIPPLE_MAX; r++) {
+        if (!ripples[r].led1) continue;
+        uint16_t age = timer_elapsed(ripples[r].time);
+        if (age >= 500) {
+            ripples[r].led1 = 0;
+            continue;
         }
-        if (!v) continue;
-        RGB c = hsv_to_rgb((HSV){hue, 230, scale8(v > 255 ? 255 : v, rgb_matrix_get_val()) / 3});
-        rgb_matrix_set_color(i, qadd8(0x26, c.r), qadd8(0x11, c.g), qadd8(0x04, c.b));
+        RGB c = hsv_to_rgb((HSV){hue, 255, 0xBF * (500 - age) / 500});
+        rgb_matrix_set_color(ripples[r].led1 - 1, c.r, c.g, c.b);
     }
 }
 
@@ -224,16 +215,16 @@ void side_led_show_user(void) {
     } else if (game == GAME_VALHEIM) {
         r = 0x73; g = 0x09; b = 0x42;
     } else if (!night && !study) {
-        // amber, 50% at rest easing up to 65% while you type
+        // dark orange, 50% at rest easing up to 75% while you type
         static uint8_t  pct = 50;
         static uint16_t step;
         if (timer_elapsed(step) > 20) {
             step         = timer_read();
-            uint8_t want = timer_elapsed32(last_press) < 800 ? 65 : 50;
+            uint8_t want = timer_elapsed32(last_press) < 800 ? 75 : 50;
             if (pct < want) pct++;
             if (pct > want) pct--;
         }
-        r = 0xFF * pct / 100; g = 0x78 * pct / 100; b = 0x28 * pct / 100;
+        r = 0xFF * pct / 100; g = 0x50 * pct / 100; b = 0x00;
     }
 
     set_left_rgb(r, g, b);
@@ -364,10 +355,10 @@ bool rgb_matrix_indicators_user(void) {
     uint8_t              mods    = get_mods();
     uint8_t              layer   = get_highest_layer(layer_state);
 
-    // ripples and splashes are amber, WPM heat retints them
-    uint8_t hue = (wpm_heat && !game) ? wpm_hue(wpm_heat_level()) : 20;
+    // key flashes and splashes are dark orange, WPM heat retints them
+    uint8_t hue = (wpm_heat && !game) ? wpm_hue(wpm_heat_level()) : 14;
 
-    // base: games, study and night replace the amber glow
+    // base: games, study and night replace the dark orange key flashes
     if (game == GAME_FACTORIO) {
         rgb_matrix_set_color_all(0, 0, 0);
         PAINT(numrow, 0x59, 0x2B, 0x00);
@@ -400,11 +391,8 @@ bool rgb_matrix_indicators_user(void) {
         rgb_matrix_set_color_all(0x0D, 0x06, 0x02);
         PAINT(homing, 0x33, 0x18, 0x08);
     } else {
-        // amber glow, soft ripples, F and J bright
-        static const uint16_t homing[] = {KC_F, KC_J};
-        rgb_matrix_set_color_all(0x26, 0x11, 0x04);
-        base_ripple(hue);
-        PAINT(homing, 0x80, 0x3A, 0x10);
+        rgb_matrix_set_color_all(0, 0, 0);
+        base_flash(hue);
     }
 
     // Neovim (focused): mode keys fade in, W orange while unsaved, ink in insert
@@ -434,13 +422,13 @@ bool rgb_matrix_indicators_user(void) {
         }
     }
 
-    // Fn+P timer, any base: F1-F12 drain over 25 min (one about every 2 min), amber ring from G when done
+    // Fn+P timer, any base: F1-F12 in teal drain over 25 min (one about every 2 min), teal ring from G when done
     uint32_t el = timer_elapsed32(focus_start);
     if (focus_timer && el < FOCUS_LEN) {
         uint8_t left = (12 * (FOCUS_LEN - el) + FOCUS_LEN - 1) / FOCUS_LEN;
         for (uint8_t col = 1; col <= left; col++) {
             uint8_t led = g_led_config.matrix_co[0][col];
-            if (led != NO_LED) rgb_matrix_set_color(led, 0x4D, 0x24, 0x0C);
+            if (led != NO_LED) rgb_matrix_set_color(led, 0x12, 0x80, 0x6A);
         }
     } else if (focus_timer && el < FOCUS_LEN + 1200) {
         uint8_t g      = g_led_config.matrix_co[3][5];
@@ -450,7 +438,7 @@ bool rgb_matrix_indicators_user(void) {
             int16_t dx   = g_led_config.point[i].x - g_led_config.point[g].x;
             int16_t dy   = g_led_config.point[i].y - g_led_config.point[g].y;
             int16_t ring = abs(sqrt16(dx * dx + dy * dy) - radius);
-            if (ring < 16) rgb_matrix_set_color(i, scale8(0x66, fade) * (16 - ring) / 16, scale8(0x30, fade) * (16 - ring) / 16, scale8(0x10, fade) * (16 - ring) / 16);
+            if (ring < 16) rgb_matrix_set_color(i, scale8(0x12, fade) * (16 - ring) / 16, scale8(0x80, fade) * (16 - ring) / 16, scale8(0x6A, fade) * (16 - ring) / 16);
         }
     } else {
         focus_timer = false;
@@ -493,7 +481,7 @@ bool rgb_matrix_indicators_user(void) {
     if (layer == 5) legend(5, 0x48, 0x00, 0x80);
     if (layer == 1 || layer == 3) legend(layer, 0x80, 0x00, 0x00);
 
-    // splashes, amber and a third as strong at night
+    // splashes in the base color, amber and a third as strong in night or study
     for (uint8_t s = 0; s < SPLASH_MAX; s++) {
         splash_t *sp = &splashes[s];
         if (!sp->size) continue;
