@@ -28,6 +28,8 @@ enum user_keycodes {
     TG_GAME = QK_USER_0, // Fn+G: off -> Factorio -> Valheim -> off
     TG_NGHT,             // Fn+N: night base
     TG_WPM,              // Fn+W: WPM heat
+    TG_STDY,             // Fn+S: study base
+    TG_TMR,              // Fn+P: study timer start / cancel
 };
 
 enum { GAME_OFF, GAME_FACTORIO, GAME_VALHEIM };
@@ -36,7 +38,141 @@ static uint8_t  game;
 static bool     night, wpm_heat, wispr_sweep;
 static uint16_t mod_time, wispr_time;
 
-// typing: mint ripples from each keypress on a dark board
+// Neovim over Raw HID: [0x4E, mode, dirty, focused, instance], resent every second
+enum { NV_NONE, NV_NORMAL, NV_INSERT, NV_VISUAL, NV_COMMAND };
+
+static uint8_t  nv_mode, nv_prev, nv_owner;
+static bool     nv_dirty, nv_focused;
+static uint16_t nv_change;
+static uint32_t nv_seen, nv_seen_focus;
+
+// study: Night + Anki keys; Fn+P runs a 25 min timer on F1-F12 on any base
+#define FOCUS_LEN 1500000
+
+static bool     study, focus_timer;
+static uint32_t focus_start;
+
+void raw_hid_receive(uint8_t *data, uint8_t length) {
+    if (data[0] != 0x4E) return;
+    // a background Neovim can't override the focused one
+    if (!data[3] && data[4] != nv_owner && timer_elapsed32(nv_seen_focus) < 1500) return;
+    if (data[3]) {
+        nv_owner      = data[4];
+        nv_seen_focus = timer_read32();
+    }
+    if (data[1] != nv_mode) {
+        nv_prev   = nv_mode;
+        nv_mode   = data[1];
+        nv_change = timer_read();
+    }
+    nv_dirty   = data[2];
+    nv_focused = data[3];
+    nv_seen    = timer_read32();
+}
+
+// heard from Neovim in the last 3 s, and no game or study base on
+static bool nv_alive(void) {
+    return nv_mode && timer_elapsed32(nv_seen) < 3000 && !game && !study;
+}
+
+// 150 ms fade between modes
+static uint8_t nv_fade(void) {
+    uint16_t el = timer_elapsed(nv_change);
+    return el >= 150 ? 255 : el * 255 / 150;
+}
+
+static const uint8_t nv_rgb[][3] = {
+    {0x00, 0x00, 0x00}, {0x24, 0xFF, 0xD4}, {0xFF, 0xF2, 0xD6}, {0xFF, 0x14, 0x93}, {0xFF, 0x7A, 0x00},
+};
+
+// key, the mode whose color it shows (0 = this mode), brightness %
+typedef struct {
+    uint16_t kc;
+    uint8_t  to, pct;
+} nv_key_t;
+
+#define NV_EXITS {LT(1, KC_ESC), 0, 80}, {LT(5, KC_ESC), 0, 80}
+
+static const nv_key_t nv_normal[] = {
+    {KC_H, 0, 100}, {KC_J, 0, 100}, {KC_K, 0, 100}, {KC_L, 0, 100}, {KC_W, 0, 100}, {KC_B, 0, 100}, {KC_E, 0, 100}, {KC_G, 0, 100},
+    {KC_D, 0, 60}, {KC_C, 0, 60}, {KC_Y, 0, 60}, {KC_P, 0, 60}, {KC_X, 0, 60}, {KC_U, 0, 60},
+    {KC_I, NV_INSERT, 100}, {KC_A, NV_INSERT, 100}, {KC_O, NV_INSERT, 100}, {KC_V, NV_VISUAL, 100}, {KC_SCLN, NV_COMMAND, 100},
+    {KC_SLSH, 0, 60}, {KC_N, 0, 60}, {KC_SPC, 0, 45},
+};
+static const nv_key_t nv_insert[] = {NV_EXITS};
+static const nv_key_t nv_visual[] = {
+    {KC_H, 0, 100}, {KC_J, 0, 100}, {KC_K, 0, 100}, {KC_L, 0, 100}, {KC_W, 0, 100}, {KC_B, 0, 100}, {KC_E, 0, 100},
+    {KC_D, 0, 60}, {KC_C, 0, 60}, {KC_Y, 0, 60}, {KC_COMM, 0, 60}, {KC_DOT, 0, 60}, {KC_GRV, 0, 60},
+    {KC_O, 0, 80}, NV_EXITS,
+};
+static const nv_key_t nv_command[] = {
+    {KC_ENT, 0, 100}, {KC_UP, 0, 60}, {KC_DOWN, 0, 60}, {KC_TAB, 0, 60}, {KC_W, 0, 60}, {KC_Q, 0, 60}, NV_EXITS,
+};
+
+static const struct {
+    const nv_key_t *keys;
+    uint8_t         n;
+} nv_sets[] = {
+    {NULL, 0}, {nv_normal, ARRAY_SIZE(nv_normal)}, {nv_insert, ARRAY_SIZE(nv_insert)}, {nv_visual, ARRAY_SIZE(nv_visual)}, {nv_command, ARRAY_SIZE(nv_command)},
+};
+
+// what a key shows in a Neovim mode, at 50% (the board's max)
+static RGB nv_key_rgb(uint8_t mode, uint16_t kc) {
+    RGB c = {0};
+    for (uint8_t i = 0; i < nv_sets[mode].n; i++) {
+        const nv_key_t *k = &nv_sets[mode].keys[i];
+        if (k->kc != kc) continue;
+        const uint8_t *src = nv_rgb[k->to ? k->to : mode];
+        c.r = src[0] * k->pct / 200;
+        c.g = src[1] * k->pct / 200;
+        c.b = src[2] * k->pct / 200;
+        break;
+    }
+    return c;
+}
+
+// insert mode ink: typed keys stay lit and fade over 2 s
+#define INK_MAX 24
+
+static struct {
+    uint8_t  led1; // led + 1, 0 = empty
+    uint16_t time;
+} ink[INK_MAX];
+static uint8_t ink_next;
+
+// base ripples: every keypress, drawn softly over the amber glow
+#define RIPPLE_MAX 16
+
+static struct {
+    uint8_t  led1; // led + 1, 0 = empty
+    uint16_t time;
+} ripples[RIPPLE_MAX];
+static uint8_t  ripple_next;
+static uint32_t last_press;
+
+static void base_ripple(uint8_t hue) {
+    for (uint8_t i = 0; i < RGB_MATRIX_LED_COUNT; i++) {
+        uint16_t v = 0;
+        for (uint8_t r = 0; r < RIPPLE_MAX; r++) {
+            if (!ripples[r].led1) continue;
+            uint16_t age = timer_elapsed(ripples[r].time);
+            if (age >= 510) {
+                ripples[r].led1 = 0;
+                continue;
+            }
+            uint8_t  p      = ripples[r].led1 - 1;
+            int16_t  dx     = g_led_config.point[i].x - g_led_config.point[p].x;
+            int16_t  dy     = g_led_config.point[i].y - g_led_config.point[p].y;
+            uint16_t effect = age / 2 + sqrt16(dx * dx + dy * dy) * 5;
+            if (effect < 255) v += 255 - effect;
+        }
+        if (!v) continue;
+        RGB c = hsv_to_rgb((HSV){hue, 230, scale8(v > 255 ? 255 : v, rgb_matrix_get_val()) / 3});
+        rgb_matrix_set_color(i, qadd8(0x26, c.r), qadd8(0x11, c.g), qadd8(0x04, c.b));
+    }
+}
+
+// the reactive effect only runs underneath; the keymap draws every look over it
 void keyboard_post_init_user(void) {
     rgb_matrix_mode_noeeprom(RGB_MATRIX_SOLID_REACTIVE_MULTIWIDE);
     rgb_matrix_sethsv_noeeprom(120, 220, rgb_matrix_get_val());
@@ -73,6 +209,12 @@ void side_led_show_user(void) {
         r = 0x90; g = 0x00; b = 0xFF;
     } else if (layer == 1 || layer == 3) {
         r = 0xFF; g = 0x00; b = 0x00;
+    } else if (nv_alive()) {
+        uint8_t k   = nv_fade();
+        uint8_t pct = nv_focused ? 75 : 25;
+        r = lerp8by8(nv_rgb[nv_prev][0], nv_rgb[nv_mode][0], k) * pct / 100;
+        g = lerp8by8(nv_rgb[nv_prev][1], nv_rgb[nv_mode][1], k) * pct / 100;
+        b = lerp8by8(nv_rgb[nv_prev][2], nv_rgb[nv_mode][2], k) * pct / 100;
     } else if (wpm_heat && !game) {
         uint8_t heat = wpm_heat_level();
         RGB     c    = hsv_to_rgb((HSV){wpm_hue(heat), 255, 64 + scale8(191, heat)});
@@ -81,6 +223,17 @@ void side_led_show_user(void) {
         r = 0x80; g = 0x3D; b = 0x00;
     } else if (game == GAME_VALHEIM) {
         r = 0x73; g = 0x09; b = 0x42;
+    } else if (!night && !study) {
+        // amber, 50% at rest easing up to 65% while you type
+        static uint8_t  pct = 50;
+        static uint16_t step;
+        if (timer_elapsed(step) > 20) {
+            step         = timer_read();
+            uint8_t want = timer_elapsed32(last_press) < 800 ? 65 : 50;
+            if (pct < want) pct++;
+            if (pct > want) pct--;
+        }
+        r = 0xFF * pct / 100; g = 0x78 * pct / 100; b = 0x28 * pct / 100;
     }
 
     set_left_rgb(r, g, b);
@@ -117,6 +270,13 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
         case TG_WPM:
             wpm_heat = !wpm_heat;
             return false;
+        case TG_STDY:
+            study = !study;
+            return false;
+        case TG_TMR:
+            focus_timer = !focus_timer;
+            focus_start = timer_read32();
+            return false;
         case KC_LGUI:
         case KC_RGUI:
         case KC_LALT:
@@ -140,6 +300,17 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
     }
 
     uint8_t led = g_led_config.matrix_co[record->event.key.row][record->event.key.col];
+    if (nv_alive() && nv_focused && nv_mode == NV_INSERT && led != NO_LED) {
+        ink[ink_next].led1 = led + 1;
+        ink[ink_next].time = timer_read();
+        ink_next           = (ink_next + 1) % INK_MAX;
+    }
+    last_press = timer_read32();
+    if (led != NO_LED) {
+        ripples[ripple_next].led1 = led + 1;
+        ripples[ripple_next].time = timer_read();
+        ripple_next               = (ripple_next + 1) % RIPPLE_MAX;
+    }
     if (size && led != NO_LED) {
         splashes[splash_next] = (splash_t){g_led_config.point[led].x, g_led_config.point[led].y, size, timer_read()};
         splash_next = (splash_next + 1) % SPLASH_MAX;
@@ -190,18 +361,13 @@ static const uint16_t val_bar[]  = {KC_1, KC_2, KC_3, KC_4, KC_5, KC_6, KC_7, KC
 
 bool rgb_matrix_indicators_user(void) {
     static const uint8_t reach[] = {0, 25, 60, 160};
-    static uint8_t       hue     = 120;
     uint8_t              mods    = get_mods();
     uint8_t              layer   = get_highest_layer(layer_state);
 
-    // WPM heat retints the ripples
-    uint8_t want = (wpm_heat && !game) ? wpm_hue(wpm_heat_level()) : 120;
-    if (want != hue) {
-        hue = want;
-        rgb_matrix_sethsv_noeeprom(hue, 220, rgb_matrix_get_val());
-    }
+    // ripples and splashes are amber, WPM heat retints them
+    uint8_t hue = (wpm_heat && !game) ? wpm_hue(wpm_heat_level()) : 20;
 
-    // base: games and night replace the ripples
+    // base: games, study and night replace the amber glow
     if (game == GAME_FACTORIO) {
         rgb_matrix_set_color_all(0, 0, 0);
         PAINT(numrow, 0x59, 0x2B, 0x00);
@@ -214,10 +380,80 @@ bool rgb_matrix_indicators_user(void) {
         PAINT(val_move, 0x59, 0x2B, 0x00);
         PAINT(val_act, 0x66, 0x08, 0x3B);
         PAINT(wasd, 0x30, 0x00, 0x00);
+    } else if (study) {
+        static const uint16_t homing[] = {KC_F, KC_J};
+        static const uint16_t again[]  = {KC_1, KC_J};
+        static const uint16_t hard[]   = {KC_2, KC_K};
+        static const uint16_t good[]   = {KC_3, KC_L};
+        static const uint16_t easy[]   = {KC_4, KC_SCLN};
+        static const uint16_t reveal[] = {KC_SPC};
+        rgb_matrix_set_color_all(0x0D, 0x06, 0x02);
+        PAINT(homing, 0x33, 0x18, 0x08);
+        PAINT(again, 0x4D, 0x0C, 0x09);
+        PAINT(hard, 0x4D, 0x2A, 0x00);
+        PAINT(good, 0x18, 0x42, 0x1B);
+        PAINT(easy, 0x18, 0x33, 0x4D);
+        PAINT(reveal, 0x4D, 0x24, 0x0C);
+
     } else if (night) {
         static const uint16_t homing[] = {KC_F, KC_J};
         rgb_matrix_set_color_all(0x0D, 0x06, 0x02);
         PAINT(homing, 0x33, 0x18, 0x08);
+    } else {
+        // amber glow, soft ripples, F and J bright
+        static const uint16_t homing[] = {KC_F, KC_J};
+        rgb_matrix_set_color_all(0x26, 0x11, 0x04);
+        base_ripple(hue);
+        PAINT(homing, 0x80, 0x3A, 0x10);
+    }
+
+    // Neovim (focused): mode keys fade in, W orange while unsaved, ink in insert
+    if (nv_alive() && nv_focused) {
+        uint8_t k = nv_fade();
+        rgb_matrix_set_color_all(0, 0, 0);
+        for (uint8_t row = 0; row < MATRIX_ROWS; row++) {
+            for (uint8_t col = 0; col < MATRIX_COLS; col++) {
+                uint8_t led = g_led_config.matrix_co[row][col];
+                if (led == NO_LED) continue;
+                uint16_t kc = keymap_key_to_keycode(0, (keypos_t){.row = row, .col = col});
+                RGB      a  = nv_key_rgb(nv_prev, kc);
+                RGB      c  = nv_key_rgb(nv_mode, kc);
+                if (nv_dirty && kc == KC_W) c = (RGB){.r = 0x80, .g = 0x3D, .b = 0x00};
+                rgb_matrix_set_color(led, lerp8by8(a.r, c.r, k), lerp8by8(a.g, c.g, k), lerp8by8(a.b, c.b, k));
+            }
+        }
+        for (uint8_t i = 0; nv_mode == NV_INSERT && i < INK_MAX; i++) {
+            if (!ink[i].led1) continue;
+            uint16_t age = timer_elapsed(ink[i].time);
+            if (age >= 2000) {
+                ink[i].led1 = 0;
+                continue;
+            }
+            uint8_t v = 0x52 * (2000 - age) / 2000;
+            rgb_matrix_set_color(ink[i].led1 - 1, v, scale8(v, 0xF2), scale8(v, 0xD6));
+        }
+    }
+
+    // Fn+P timer, any base: F1-F12 drain over 25 min (one about every 2 min), amber ring from G when done
+    uint32_t el = timer_elapsed32(focus_start);
+    if (focus_timer && el < FOCUS_LEN) {
+        uint8_t left = (12 * (FOCUS_LEN - el) + FOCUS_LEN - 1) / FOCUS_LEN;
+        for (uint8_t col = 1; col <= left; col++) {
+            uint8_t led = g_led_config.matrix_co[0][col];
+            if (led != NO_LED) rgb_matrix_set_color(led, 0x4D, 0x24, 0x0C);
+        }
+    } else if (focus_timer && el < FOCUS_LEN + 1200) {
+        uint8_t g      = g_led_config.matrix_co[3][5];
+        uint8_t radius = (el - FOCUS_LEN) * 170 / 1200;
+        uint8_t fade   = 255 - (el - FOCUS_LEN) * 255 / 1200;
+        for (uint8_t i = 0; i < RGB_MATRIX_LED_COUNT; i++) {
+            int16_t dx   = g_led_config.point[i].x - g_led_config.point[g].x;
+            int16_t dy   = g_led_config.point[i].y - g_led_config.point[g].y;
+            int16_t ring = abs(sqrt16(dx * dx + dy * dy) - radius);
+            if (ring < 16) rgb_matrix_set_color(i, scale8(0x66, fade) * (16 - ring) / 16, scale8(0x30, fade) * (16 - ring) / 16, scale8(0x10, fade) * (16 - ring) / 16);
+        }
+    } else {
+        focus_timer = false;
     }
 
     // Fn+\ battery: number row gauge red -> green, WASD low red
@@ -279,7 +515,7 @@ bool rgb_matrix_indicators_user(void) {
             if (ring >= 12) continue;
 
             uint8_t v   = (uint16_t)rgb_matrix_get_val() * fade / 255 * (12 - ring) / 12;
-            HSV     hsv = night && !game ? (HSV){20, 230, v / 3} : (HSV){hue, 220, v};
+            HSV     hsv = (night || study) && !game ? (HSV){20, 230, v / 3} : (HSV){hue, 220, v};
             RGB     rgb = hsv_to_rgb(hsv);
             rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
         }
@@ -302,8 +538,8 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
 [1] = LAYOUT_ansi_84(
 	_______, 	KC_F1,  	KC_F2,  	KC_F3, 		KC_F4,  	KC_F5,  	KC_F6,  	KC_F7,  	KC_F8,  	KC_F9, 		KC_F10, 	KC_F11, 	KC_F12, 	MAC_PRT,	_______,	_______,
 	_______, 	LNK_BLE1,  	LNK_BLE2,  	LNK_BLE3,  	LNK_RF,   	_______,   	_______,   	_______,   	_______,   	_______,  	_______,   	_______,	_______, 				_______,	_______,
-	_______, 	_______,   	TG_WPM ,   	_______,  	_______,   	_______,   	_______,   	_______,   	_______,   	_______,  	_______,   	DEV_RESET,	SLEEP_MODE, 			BAT_SHOW,	_______,
-	_______,	_______,   	_______,   	_______,  	_______,   	TG_GAME,   	_______,	_______,   	_______,   	_______,  	_______,	_______, 	 						_______,	_______,
+	_______, 	_______,   	TG_WPM ,   	_______,  	_______,   	_______,   	_______,   	_______,   	_______,   	_______,  	TG_TMR ,   	DEV_RESET,	SLEEP_MODE, 			BAT_SHOW,	_______,
+	_______,	_______,   	TG_STDY,   	_______,  	_______,   	TG_GAME,   	_______,	_______,   	_______,   	_______,  	_______,	_______, 	 						_______,	_______,
 	_______,				_______,   	_______,   	RGB_TEST,  	_______,   	BAT_NUM,   	TG_NGHT,	MO(4), 		RGB_SPD,	RGB_SPI,	_______,				_______,	RGB_VAI,	_______,
 	_______,	_______,	_______,										_______, 							_______,	MO(1),   	_______,				RGB_MOD,	RGB_VAD,    RGB_HUI),
 

@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Neovim Note Lighting</title>
+<style>
+  :root { --bg: #0e0f12; --panel: #16181d; --line: #262a31; --text: #e7e9ee; --muted: #8b919c; --cap: #22252b; --cap-text: #9aa1ac; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif; }
+  main { max-width: 1280px; margin: 0 auto; padding: 32px 16px 72px; }
+  h1 { font-size: 26px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 44px 0 12px; }
+  h3 { margin: 0; font-size: 16px; }
+  p { margin: 0 0 8px; }
+  .lede { color: var(--muted); max-width: 800px; }
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+  tr:last-child td { border-bottom: 0; }
+  kbd, code { font: 600 12px ui-monospace, SFMono-Regular, Menlo, monospace; background: #262a31; border: 1px solid #343944; border-radius: 5px; padding: 1px 6px; white-space: nowrap; }
+  .sw { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+  .grid4 { display: grid; grid-template-columns: repeat(auto-fill, minmax(560px, 1fr)); gap: 16px; }
+  .grid3 { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 12px; }
+  @media (max-width: 620px) { .grid4, .grid3 { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+  .card header { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .pick { font: 700 12px ui-monospace, Menlo, monospace; color: var(--muted); border: 1px solid var(--line); border-radius: 99px; padding: 1px 9px; white-space: nowrap; }
+  .pick.rec { color: #24ffd4; border-color: #1d5b50; }
+  .desc { color: var(--muted); font-size: 13px; margin-top: 8px; }
+  .decision { background: #121418; border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-bottom: 16px; }
+  .decision > header { display: flex; gap: 12px; align-items: baseline; margin-bottom: 4px; }
+  .decision .id { font: 700 13px ui-monospace, Menlo, monospace; color: #ff7a00; }
+  .decision .q { font-size: 17px; font-weight: 650; }
+  .decision .why { color: var(--muted); margin-bottom: 12px; max-width: 900px; }
+  .status { font: 12px ui-monospace, Menlo, monospace; color: var(--muted); height: 18px; margin-top: 8px; display: flex; justify-content: space-between; }
+  .nvline { font: 12px ui-monospace, Menlo, monospace; padding: 3px 8px; border-radius: 5px; background: #1d2026; display: inline-block; min-width: 110px; }
+  .board-wrap { display: grid; grid-template-columns: 8px 1fr 8px; gap: 8px; margin-top: 10px; padding: 10px; background: #0b0c0f; border-radius: 10px; border: 1px solid #1d2026; }
+  .rail { align-self: start; height: calc(100% / 6); border-radius: 4px; background: #1a1c21; }
+  .board { position: relative; width: 100%; aspect-ratio: 16 / 6; }
+  .key { position: absolute; border-radius: 4px; background: var(--cap); color: var(--cap-text); display: flex; padding: 2px 4px; font-size: clamp(5px, 0.75vw, 9px); font-weight: 600; overflow: hidden; white-space: nowrap; }
+  .key.held { outline: 1.5px solid #ffffffcc; outline-offset: -1.5px; }
+  .key.tap { outline: 1.5px solid #ffffff66; outline-offset: -1.5px; }
+  .answer { background: var(--panel); border: 1px dashed #3a3f49; border-radius: 12px; padding: 16px; font: 13px ui-monospace, Menlo, monospace; color: var(--muted); }
+  .answer b { color: var(--text); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Neovim note lighting – decision doc</h1>
+  <p class="lede">Your Air75 V2 while you take notes in Neovim. Neovim tells the board its mode, vault and note type over the USB cable. Everything below runs live, using the same lighting math as the firmware. The top half is what's decided. The bottom half is seven open decisions, each with options A, B and C, so you can reply in chat like <code>D1 B, D2 A, …</code>.</p>
+
+  <h2>Locked in</h2>
+  <table>
+    <tr><th>Decision</th><th>Answer</th></tr>
+    <tr><td>Signals</td><td>Neovim sends its mode, unsaved-changes flag and focus over USB (Raw HID + a small Lua hook). No vault or note type (D3 dropped). Not 100% sure the 2.4G dongle or Bluetooth pass this through, so plan on the cable.</td></tr>
+    <tr><td>Study mode</td><td>Toggleable, keyboard-only (works wireless), starts from the Night theme</td></tr>
+    <tr><td>Where mode shows</td><td>Both rails at 75%, plus the keys that matter in that mode at 50% (the board's hardware max is 50%, so mode keys run at full available brightness)</td></tr>
+    <tr><td>Mode colors</td><td>
+      <span class="sw" style="background:#24ffd4"></span>Normal mint ·
+      <span class="sw" style="background:#fff2d6"></span>Insert warm white ·
+      <span class="sw" style="background:#ff1493"></span>Visual hot pink ·
+      <span class="sw" style="background:#ff7a00"></span>Command orange
+      – none of these clash with nav violet, Fn red or NuPhy's status blinks</td></tr>
+    <tr><td>D1 Insert typing</td><td>C – ink trail: typed keys stay faintly lit and fade over 2 s</td></tr>
+    <tr><td>D2 Mode change</td><td>B – 150 ms fade</td></tr>
+    <tr><td>D3 Note context</td><td>Dropped</td></tr>
+    <tr><td>D4 Unsaved changes</td><td>C – <kbd>W</kbd> glows orange until <kbd>:w</kbd></td></tr>
+    <tr><td>D5 Other app focused</td><td>B – Neovim's mode stays on the rails at 25%, and your base runs on the keys</td></tr>
+    <tr><td>D6 Study mode</td><td>A + B – Anki answer keys (<kbd>1 2 3 4</kbd> and <kbd>j k l ;</kbd>) + <kbd>Space</kbd>, and the F1–F12 focus timer</td></tr>
+    <tr><td>D7 Mode keys</td><td>B – keys that switch modes glow in the color of the mode they lead to</td></tr>
+  </table>
+
+  <h2>The four modes</h2>
+  <div class="grid4" id="modes"></div>
+
+  <h2>A session, end to end</h2>
+  <p class="lede">Normal → <kbd>i</kbd> insert and type → <kbd>Esc</kbd> → <kbd>v</kbd> select → <kbd>y</kbd> yank → <kbd>:</kbd> <kbd>w</kbd> <kbd>Enter</kbd>. Instant switching is shown here; D2 covers transitions.</p>
+  <div class="grid4" id="session"></div>
+
+  <h2>Open decisions</h2>
+  <div id="decisions"></div>
+
+  <h2>How to answer</h2>
+  <div class="answer">Reply in chat with one pick per decision, plus any tweaks, e.g.<br><br>
+    <b>D1 C · D2 B · D3 A · D4 B · D5 B · D6 A+B · D7 B</b><br><br>
+    The <span style="color:#24ffd4">rec</span> tag marks my recommendation for each. Colors can change at any point, but changing a decision after it's built means rewriting code.</div>
+</main>
+
+<script>
+// ---- layout: your caps, Air75 V2 ANSI 84 -----------------------------------
+const ROWS = [
+  [['esc_l','ESC'],['f1','F1'],['f2','F2'],['f3','F3'],['f4','F4'],['f5','F5'],['f6','F6'],['f7','F7'],['f8','F8'],['f9','F9'],['f10','F10'],['f11','F11'],['f12','F12'],['pgup','PGUP'],['pgdn','PGDN'],['esc_r','ESC']],
+  [['grv','`'],['n1','1'],['n2','2'],['n3','3'],['n4','4'],['n5','5'],['n6','6'],['n7','7'],['n8','8'],['n9','9'],['n0','0'],['mins','-'],['eql','='],['bksp','BKSP',2],['del','DEL']],
+  [['tab','TAB',1.5],['q','Q'],['w','W'],['e','E'],['r','R'],['t','T'],['y','Y'],['u','U'],['i','I'],['o','O'],['p','P'],['lbrc','['],['rbrc',']'],['bsls','\\',1.5],['ropt','R OPT']],
+  [['caps','CAPS',1.75],['a','A'],['s','S'],['d','D'],['f','F'],['g','G'],['h','H'],['j','J'],['k','K'],['l','L'],['scln',';'],['quot',"'"],['ent','ENTER',2.25],['home','HOME']],
+  [['lsft','SHIFT',2.25],['z','Z'],['x','X'],['c','C'],['v','V'],['b','B'],['n','N'],['m','M'],['comm',','],['dot','.'],['slsh','/'],['rsft','SHIFT',1.75],['up','↑'],['end','END']],
+  [['lctl','CTRL',1.25],['lopt','OPT',1.25],['lcmd','CMD',1.25],['spc','',6.25],['rcmd','CMD'],['fn','FN'],['rctl','CTRL'],['left','←'],['down','↓'],['right','→']],
+];
+const KEYS = [];
+ROWS.forEach((row, r) => { let x = 0; row.forEach(([id, label, w = 1]) => { KEYS.push({ id, label, r, x, w, cx: (x + w / 2) * 150 / 16, cy: r * 10 }); x += w; }); });
+const BY = Object.fromEntries(KEYS.map(k => [k.id, k]));
+const LETTERS = 'qwertyuiopasdfghjklzxcvbnm'.split('');
+
+// ---- color ---------------------------------------------------------------
+const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+const scale = (c, k) => c.map(v => v * k);
+const add = (a, b) => a.map((v, i) => Math.min(255, v + b[i]));
+const lerp = (a, b, k) => a.map((v, i) => v + (b[i] - v) * k);
+const OFF = [0, 0, 0];
+const MODE = { normal: hex('#24ffd4'), insert: hex('#fff2d6'), visual: hex('#ff1493'), command: hex('#ff7a00') };
+const KEY_K = 0.5, RAIL_K = 0.75;
+const AMBER = [255, 120, 40], COOL = hex('#cfe3ff');
+const dist = (a, b) => Math.hypot(a.cx - b.cx, a.cy - b.cy);
+
+// ---- which keys matter in each mode --------------------------------------
+const SETS = {
+  normal: {
+    motion: ['h','j','k','l','w','b','e','g'],
+    edit:   ['d','c','y','p','x','u'],
+    to_insert: ['i','a','o'], to_visual: ['v'], to_command: ['scln'],
+    search: ['slsh','n'], leader: ['spc'],
+  },
+  insert:  { exit: ['esc_l','esc_r','caps'] },
+  visual:  { motion: ['h','j','k','l','w','b','e'], edit: ['d','c','y','comm','dot','grv'], swap: ['o'], exit: ['esc_l','esc_r','caps'] },
+  command: { run: ['ent'], exit: ['esc_l','esc_r','caps'], hist: ['up','down','tab'], common: ['w','q'] },
+};
+// tiered shading (D7): role -> brightness factor, or a "next mode" color
+const TIER = { motion: 1, edit: 0.6, search: 0.6, leader: 0.45, swap: 0.8, exit: 0.8, run: 1, hist: 0.6, common: 0.6 };
+const NEXT = { to_insert: 'insert', to_visual: 'visual', to_command: 'command' };
+
+function modeKeys(out, mode, shade = 'flat', k = 1) {
+  for (const [role, ids] of Object.entries(SETS[mode])) {
+    let c = MODE[mode];
+    if (shade !== 'flat' && NEXT[role] && shade === 'next') c = MODE[NEXT[role]];
+    const f = shade === 'flat' ? 1 : (NEXT[role] ? 1 : TIER[role] ?? 1);
+    ids.forEach(id => out[id] = scale(c, KEY_K * f * k));
+  }
+}
+
+// ---- effects -------------------------------------------------------------
+function ripple(out, presses, t, color, k = 1) {
+  for (const key of KEYS) {
+    let v = 0;
+    for (const p of presses) { const e = (t - p.t) / 2 + dist(key, BY[p.id]) * 5; if (e < 255) v = Math.min(255, v + 255 - e); }
+    if (v) out[key.id] = add(out[key.id] || OFF, scale(color, v / 255 * 0.5 * k));
+  }
+}
+function ink(out, presses, t, color) { // typed keys stay lit and fade over 2 s
+  for (const p of presses) { const age = t - p.t; if (age < 2000) out[p.id] = add(out[p.id] || OFF, scale(color, 0.32 * (1 - age / 2000))); }
+}
+const tapped = (s, t) => new Set(s.presses.filter(p => t - p.t < 90).map(p => p.id));
+const phase = (t, spans) => { const tot = spans.reduce((a, [, ms]) => a + ms, 0); let m = t % tot;
+  for (const [name, ms] of spans) { if (m < ms) return { name, k: m / ms, ms: m, i: spans.findIndex(s => s[0] === name) }; m -= ms; } };
+function typer(s, t, ids, rate) {
+  if (t - (s.last || 0) > rate * (0.6 + Math.random() * 0.8)) { s.last = t; s.presses.push({ id: ids[Math.floor(Math.random() * ids.length)], t }); }
+  s.presses = s.presses.filter(p => t - p.t < 2200);
+}
+const LABEL = { normal: 'NORMAL', insert: '-- INSERT --', visual: '-- VISUAL --', command: ':' };
+
+// ---- boards --------------------------------------------------------------
+function makeBoard(container, opts) {
+  const el = document.createElement('section'); el.className = 'card';
+  el.innerHTML = `<header><h3>${opts.title}</h3>${opts.pick ? `<span class="pick ${opts.rec ? 'rec' : ''}">${opts.pick}${opts.rec ? ' · rec' : ''}</span>` : ''}</header>
+    <div class="board-wrap"><div class="rail"></div><div class="board"></div><div class="rail"></div></div>
+    <div class="status"><span class="nvline"></span><span class="note"></span></div>
+    ${opts.desc ? `<div class="desc">${opts.desc}</div>` : ''}`;
+  container.appendChild(el);
+  const board = el.querySelector('.board'), keyEls = {};
+  for (const k of KEYS) { const d = document.createElement('div'); d.className = 'key'; d.textContent = k.label;
+    Object.assign(d.style, { left: `calc(${k.x / 16 * 100}% + 1.2px)`, top: `calc(${k.r / 6 * 100}% + 1.2px)`, width: `calc(${k.w / 16 * 100}% - 2.4px)`, height: `calc(${100 / 6}% - 2.4px)` });
+    board.appendChild(d); keyEls[k.id] = d; }
+  const [railL, railR] = el.querySelectorAll('.rail');
+  BOARDS.push({ frame: opts.frame, keyEls, railL, railR, nv: el.querySelector('.nvline'), note: el.querySelector('.note'), state: { presses: [] }, off: Math.random() * 3000 });
+}
+const BOARDS = [];
+const css = c => `rgb(${c.map(v => Math.round(Math.max(0, Math.min(255, v)))).join(',')})`;
+const show = c => { const base = [34, 37, 43], k = Math.min(1, Math.max(...c) / 255 * 1.9); return lerp(base, c.map(v => Math.min(255, v * 1.9)), k); };
+function paintRail(el, c) { const lit = Math.max(...c) > 3; el.style.background = lit ? css(lerp([26, 28, 33], c, 0.95)) : ''; el.style.boxShadow = lit ? `0 0 10px ${css(c)}` : 'none'; }
+function tick(now) {
+  for (const b of BOARDS) {
+    const f = b.frame(b.state, now + b.off);
+    for (const k of KEYS) {
+      const c = f.keys[k.id] || OFF, el = b.keyEls[k.id], lit = Math.max(...c) > 3;
+      el.style.background = css(show(c)); el.style.boxShadow = lit ? `0 0 ${5 + Math.max(...c) / 22}px ${css(scale(c, 0.9))}` : 'none';
+      el.style.color = lit ? '#f4f6fa' : '';
+      el.className = 'key' + (f.held?.has(k.id) ? ' held' : f.tap?.has(k.id) ? ' tap' : '');
+    }
+    paintRail(b.railL, f.railL ?? f.rail ?? OFF); paintRail(b.railR, f.railR ?? f.rail ?? OFF);
+    const m = f.mode; b.nv.textContent = m ? LABEL[m] : (f.nv || ''); b.nv.style.color = m ? css(MODE[m]) : '';
+    b.note.textContent = f.note || '';
+  }
+  requestAnimationFrame(tick);
+}
+
+// standard mode frame (locked choices), with hooks for decision variants
+function modeFrame(mode, s, t, o = {}) {
+  const keys = {};
+  if (o.base) Object.assign(keys, o.base);
+  modeKeys(keys, mode, o.shade || 'flat', o.keyK ?? 1);
+  if (mode === 'insert') {
+    const st = o.insertStyle || 'ripple';
+    if (st === 'ripple') ripple(keys, s.presses, t, MODE.insert, 0.8);
+    if (st === 'ink') ink(keys, s.presses, t, MODE.insert);
+  } else ripple(keys, s.presses, t, MODE[mode], 0.35);
+  return { keys, rail: scale(MODE[mode], RAIL_K * (o.railK ?? 1)), mode, tap: tapped(s, t) };
+}
+
+// ---- the four modes ------------------------------------------------------
+const DEMO = {
+  normal:  { ids: ['j','j','k','l','w','b','e','h'], rate: 260, desc: 'Motions <kbd>h j k l w b e g</kbd>, edits <kbd>d c y p x u</kbd>, ways into the other modes <kbd>i a o</kbd> <kbd>v</kbd> <kbd>:</kbd>, search <kbd>/ n</kbd> and leader <kbd>Space</kbd>. Flat shading shown, and D7 has tiers.' },
+  insert:  { ids: LETTERS.concat(['spc','spc','spc']), rate: 120, desc: 'You\'re typing, so only the ways out stay lit: both Esc keys and Caps. Typing reaction shown as ripples, and D1 has the alternatives.' },
+  visual:  { ids: ['l','l','w','j','e'], rate: 300, desc: 'Motions that grow the selection, the actions to take on it (<kbd>d c y</kbd>, <kbd>&lt; &gt;</kbd>, <kbd>~</kbd>), <kbd>o</kbd> to jump to the other end, and the ways out.' },
+  command: { ids: ['w','q','tab','up'], rate: 420, desc: '<kbd>Enter</kbd> to run, <kbd>Tab</kbd> and <kbd>↑ ↓</kbd> for completion and history, the common <kbd>w</kbd> and <kbd>q</kbd>, and the ways out.' },
+};
+const modesEl = document.getElementById('modes');
+for (const m of ['normal', 'insert', 'visual', 'command']) {
+  makeBoard(modesEl, { title: { normal: 'Normal', insert: 'Insert', visual: 'Visual', command: 'Command' }[m], desc: DEMO[m].desc,
+    frame(s, t) { typer(s, t, DEMO[m].ids, DEMO[m].rate); return { ...modeFrame(m, s, t), note: 'rails 75% · keys 50%' }; } });
+}
+
+// ---- session -------------------------------------------------------------
+const SESSION = [
+  ['normal', 1800, ['j','j','k','w','w']], ['insert', 3200, LETTERS.concat(['spc','spc'])], ['normal', 900, ['b','b']],
+  ['visual', 1800, ['l','w','w','e']], ['normal', 900, ['j']], ['command', 1500, ['w']], ['normal', 900, []],
+];
+const ENTER_KEY = ['i', 'esc_l', 'v', 'y', 'scln', 'ent', null];
+makeBoard(document.getElementById('session'), { title: 'Writing a note in the work vault',
+  desc: 'Keys outlined in white are the ones you press. Watch the rails and the mode keys flip together as Neovim reports each mode change.',
+  frame(s, t) {
+    const ph = phase(t, SESSION.map(([n, ms], i) => [n + i, ms]));
+    const [mode, , ids] = SESSION[ph.i];
+    if (ids.length) typer(s, t, ids, mode === 'insert' ? 120 : 300);
+    const f = modeFrame(mode, s, t);
+    const prev = ENTER_KEY[(ph.i + SESSION.length - 1) % SESSION.length];
+    if (ph.ms < 160 && prev) f.held = new Set([prev]);
+    return { ...f, note: '~/vaults/work · perm.md' };
+  } });
+
+// ---- decisions -----------------------------------------------------------
+const DECISIONS = [
+  { id: 'D1', q: 'Insert mode – how should the keys react while you type?', why: 'Insert is where you spend most note-taking time, so this is the effect you\'ll see most.',
+    opts: [
+      { pick: 'A', title: 'Warm ripples', desc: 'Each key sends a small warm-white ripple, like today\'s mint one.', frame(s, t) { typer(s, t, LETTERS, 120); return modeFrame('insert', s, t, { insertStyle: 'ripple' }); } },
+      { pick: 'B', title: 'Still', desc: 'No typing effect at all. Only the ways out and the rails are lit, which is the calmest.', frame(s, t) { typer(s, t, LETTERS, 120); return modeFrame('insert', s, t, { insertStyle: 'none' }); } },
+      { pick: 'C', rec: true, title: 'Ink trail', desc: 'Keys you type stay faintly lit and fade over 2 seconds. You can see your recent writing on the board, and it\'s quieter than ripples.', frame(s, t) { typer(s, t, LETTERS, 120); return modeFrame('insert', s, t, { insertStyle: 'ink' }); } },
+    ] },
+  { id: 'D2', q: 'Mode changes – how should the board switch?', why: 'You change modes constantly in Vim, so a slow transition gets old fast. Shown cycling normal → insert → normal.',
+    opts: [
+      { pick: 'A', title: 'Instant', desc: 'The new mode just appears. The fastest feedback.', frame(s, t) { const m = phase(t, [['normal', 1400], ['insert', 1400]]).name; return modeFrame(m, s, t); } },
+      { pick: 'B', rec: true, title: 'Quick fade (150 ms)', desc: 'Colors fade into each other over 150 ms. It reads as smooth but never gets in your way.', frame(s, t) {
+        const ph = phase(t, [['normal', 1400], ['insert', 1400]]); const from = ph.name === 'normal' ? 'insert' : 'normal';
+        const a = modeFrame(from, s, t), b = modeFrame(ph.name, s, t), k = Math.min(1, ph.ms / 150), keys = {};
+        for (const key of KEYS) keys[key.id] = lerp(a.keys[key.id] || OFF, b.keys[key.id] || OFF, k);
+        return { keys, rail: lerp(a.rail, b.rail, k), mode: ph.name }; } },
+      { pick: 'C', title: 'Sweep from Esc', desc: 'The new mode wipes left to right from the Esc key over 300 ms. The most visible, and maybe too much at Vim speed.', frame(s, t) {
+        const ph = phase(t, [['normal', 1400], ['insert', 1400]]); const from = ph.name === 'normal' ? 'insert' : 'normal';
+        const a = modeFrame(from, s, t), b = modeFrame(ph.name, s, t), x = ph.ms / 300 * 160, keys = {};
+        for (const key of KEYS) keys[key.id] = key.cx < x ? (b.keys[key.id] || OFF) : (a.keys[key.id] || OFF);
+        for (const key of KEYS) if (Math.abs(key.cx - x) < 8) keys[key.id] = scale(MODE[ph.name], 0.45);
+        return { keys, rail: x > 80 ? b.rail : a.rail, mode: ph.name }; } },
+    ] },
+  { id: 'D3', q: 'Note context – how should the vault and note type show?', why: 'Each rail is a single light, and the left and right rails can be different colors. These options use brightness and pattern instead of new colors, because the palette is nearly full.',
+    opts: [
+      { pick: 'A', rec: true, title: 'Left rail = vault, right rail = mode', desc: 'Left rail: cool white for <code>work</code>, warm amber for <code>lif3</code>. The right rail keeps the mode. You can tell where you are at a glance.', frame(s, t) {
+        typer(s, t, ['j','k','w'], 320); const v = phase(t, [['work', 2200], ['lif3', 2200]]).name;
+        return { ...modeFrame('normal', s, t), railL: scale(v === 'work' ? COOL : AMBER, 0.6), note: `~/vaults/${v}` }; } },
+      { pick: 'B', title: 'Flash on open', desc: 'Both rails stay on the mode. Opening a note flashes the number row for 1 second in the note type\'s pattern, then it\'s gone.', frame(s, t) {
+        typer(s, t, ['j','k','w'], 320); const ph = phase(t, [['perm', 2000], ['drug', 2000]]); const f = modeFrame('normal', s, t);
+        if (ph.ms < 1000) ['n1','n2','n3','n4','n5','n6','n7','n8','n9','n0'].forEach((id, i) => { if (ph.name === 'perm' || i % 2 === 0) f.keys[id] = scale(COOL, 0.35 * (1 - ph.ms / 1000)); });
+        return { ...f, note: `opened ${ph.name}.md` }; } },
+      { pick: 'C', title: 'Left rail = note type pattern', desc: 'The left rail pulses in a pattern: <code>perm</code> steady, <code>struct</code> slow breathe, <code>drug</code> double pulse. The right rail keeps the mode.', frame(s, t) {
+        typer(s, t, ['j','k','w'], 320); const ph = phase(t, [['perm', 2400], ['struct', 2400], ['drug', 2400]]);
+        let k = 0.6; if (ph.name === 'struct') k = 0.25 + 0.45 * (0.5 - 0.5 * Math.cos(ph.ms / 1600 * Math.PI * 2));
+        if (ph.name === 'drug') { const m = ph.ms % 1200; k = (m < 120 || (m > 240 && m < 360)) ? 0.7 : 0.08; }
+        return { ...modeFrame('normal', s, t), railL: scale(COOL, k), note: `${ph.name}.md` }; } },
+    ] },
+  { id: 'D4', q: 'Unsaved changes – should the board nag you?', why: 'Neovim can also report when the buffer has unsaved changes. Shown with edits for 2.5 s, then <kbd>:w</kbd>.',
+    opts: [
+      { pick: 'A', title: 'No', desc: 'Nothing changes. Saving stays Neovim\'s job.', frame(s, t) { typer(s, t, ['j','k'], 400); return modeFrame('normal', s, t); } },
+      { pick: 'B', rec: true, title: 'Right rail slow pulse', desc: 'While the buffer is modified, the mode rail gently pulses (it keeps its color). It stops the moment you <kbd>:w</kbd>.', frame(s, t) {
+        typer(s, t, ['j','k'], 400); const ph = phase(t, [['dirty', 2500], ['saved', 1800]]); const f = modeFrame('normal', s, t);
+        if (ph.name === 'dirty') f.railR = scale(MODE.normal, RAIL_K * (0.35 + 0.65 * (0.5 + 0.5 * Math.cos(t / 260))));
+        return { ...f, note: ph.name === 'dirty' ? '[+] modified' : 'written' }; } },
+      { pick: 'C', title: 'W key glows', desc: 'The <kbd>W</kbd> key glows orange (the command color) while you have unsaved changes, as a reminder of <kbd>:w</kbd>.', frame(s, t) {
+        typer(s, t, ['j','k'], 400); const ph = phase(t, [['dirty', 2500], ['saved', 1800]]); const f = modeFrame('normal', s, t);
+        if (ph.name === 'dirty') f.keys.w = scale(MODE.command, 0.5);
+        return { ...f, note: ph.name === 'dirty' ? '[+] modified' : 'written' }; } },
+    ] },
+  { id: 'D5', q: 'Leaving Neovim – what happens when another app has focus?', why: 'Neovim reports when it loses focus. Shown with Neovim focused for 2 s, then Chrome.',
+    opts: [
+      { pick: 'A', title: 'Back to your base', desc: 'The board returns to whatever base is on (Mint Ripple today, or the redesigned base later).', frame(s, t) {
+        const ph = phase(t, [['nvim', 2000], ['away', 2000]]); typer(s, t, ph.name === 'nvim' ? ['j','k'] : LETTERS, ph.name === 'nvim' ? 350 : 140);
+        if (ph.name === 'nvim') return modeFrame('normal', s, t); const keys = {}; ripple(keys, s.presses, t, MODE.normal); return { keys, rail: OFF, nv: 'Chrome', tap: tapped(s, t) }; } },
+      { pick: 'B', rec: true, title: 'Keep the mode, dimmed', desc: 'Neovim\'s mode stays at 25% on the rails only, and your base runs on the keys. When you come back you can see where you left off.', frame(s, t) {
+        const ph = phase(t, [['nvim', 2000], ['away', 2000]]); typer(s, t, ph.name === 'nvim' ? ['j','k'] : LETTERS, ph.name === 'nvim' ? 350 : 140);
+        if (ph.name === 'nvim') return modeFrame('normal', s, t); const keys = {}; ripple(keys, s.presses, t, MODE.normal); return { keys, rail: scale(MODE.insert, RAIL_K * 0.33), nv: 'Chrome (nvim: insert)', tap: tapped(s, t) }; } },
+      { pick: 'C', title: 'Rails off only', desc: 'The mode keys keep showing, but the rails go dark. The least change.', frame(s, t) {
+        const ph = phase(t, [['nvim', 2000], ['away', 2000]]); typer(s, t, ['j','k'], 350); const f = modeFrame('normal', s, t);
+        return ph.name === 'nvim' ? f : { ...f, rail: OFF, mode: null, nv: 'Chrome' }; } },
+    ] },
+  { id: 'D6', q: 'Study mode (Night base, keyboard-only) – what goes in it? Pick any combination.', why: 'It starts from Night: faint amber, F and J brighter, no ripples. No Neovim signals are needed, so it works wireless.',
+    opts: [
+      { pick: 'A', rec: true, title: 'Anki keys', desc: 'Your review keys glow: <kbd>1 2 3 4</kbd> and <kbd>j k l ;</kbd> (again / hard / good / easy) and <kbd>Space</kbd> (reveal), so you can grade cards in the dark.', frame(s, t) {
+        const keys = {}; for (const k of KEYS) keys[k.id] = scale(AMBER, 0.05); keys.f = keys.j = scale(AMBER, 0.2);
+        [['n1', [255,40,30]], ['n2', [255,140,0]], ['n3', [80,220,90]], ['n4', [80,170,255]], ['j', [255,40,30]], ['k', [255,140,0]], ['l', [80,220,90]], ['scln', [80,170,255]]].forEach(([id, c]) => keys[id] = scale(c, 0.3)); keys.spc = scale(AMBER, 0.3);
+        const ph = phase(t, [['spc', 700], ['n3', 700], ['spc', 700], ['n1', 700]]); const tap = new Set(ph.ms < 120 ? [ph.name] : []);
+        return { keys, rail: OFF, nv: 'study', tap }; } },
+      { pick: 'B', title: 'Focus timer', desc: 'A 25-minute timer on F1–F12, draining one key about every 2 minutes, with a soft amber splash when time\'s up. Mockup runs it in 10 s.', frame(s, t) {
+        const keys = {}; for (const k of KEYS) keys[k.id] = scale(AMBER, 0.05); keys.f = keys.j = scale(AMBER, 0.2);
+        const ph = phase(t, [['run', 10000], ['done', 1200]]);
+        if (ph.name === 'run') { const left = Math.ceil((1 - ph.k) * 12); for (let i = 0; i < left; i++) keys['f' + (i + 1)] = scale(AMBER, 0.3); }
+        else { const r = ph.k * 170; for (const k of KEYS) { const d = Math.abs(dist(k, BY.g) - r); if (d < 16) keys[k.id] = scale(AMBER, 0.4 * (1 - ph.k)); } }
+        return { keys, rail: OFF, nv: ph.name === 'run' ? `study · ${Math.ceil((1 - ph.k) * 25)} min` : 'study · break' }; } },
+      { pick: 'C', title: 'Calm rails', desc: 'The rails breathe slowly in amber, and the breathing slows down as your typing settles into a steady rhythm. A quiet signal that you\'re in flow.', frame(s, t) {
+        typer(s, t, LETTERS, 180); const keys = {}; for (const k of KEYS) keys[k.id] = scale(AMBER, 0.05); keys.f = keys.j = scale(AMBER, 0.2);
+        const b = 0.15 + 0.35 * (0.5 - 0.5 * Math.cos(t / 2400 * Math.PI * 2));
+        return { keys, rail: scale(AMBER, b), nv: 'study', tap: tapped(s, t) }; } },
+    ] },
+  { id: 'D7', q: 'Mode keys – one brightness, or shaded by role?', why: 'Shown in Normal mode, which has the most lit keys.',
+    opts: [
+      { pick: 'A', title: 'Flat', desc: 'Every mode key at the same 50% mint. Simple, but everything looks equally important.', frame(s, t) { typer(s, t, ['j','k','w'], 400); return modeFrame('normal', s, t, { shade: 'flat' }); } },
+      { pick: 'B', rec: true, title: 'Doors show where they go', desc: 'Keys that switch modes glow in the color of the mode they lead to: <kbd>i a o</kbd> warm white, <kbd>v</kbd> pink, <kbd>:</kbd> orange. Motions stay full and edits dimmer. The board shows you the exits.', frame(s, t) { typer(s, t, ['j','k','w'], 400); return modeFrame('normal', s, t, { shade: 'next' }); } },
+      { pick: 'C', title: 'Tiered brightness', desc: 'One color, but motions at full, edits and search at 60% and leader at 45%. A quieter hierarchy.', frame(s, t) { typer(s, t, ['j','k','w'], 400); return modeFrame('normal', s, t, { shade: 'tier' }); } },
+    ] },
+];
+const decEl = document.getElementById('decisions');
+for (const d of DECISIONS) {
+  const box = document.createElement('section'); box.className = 'decision';
+  box.innerHTML = `<header><span class="id">${d.id}</span><span class="q">${d.q}</span></header><div class="why">${d.why}</div><div class="grid3"></div>`;
+  decEl.appendChild(box);
+  for (const o of d.opts) makeBoard(box.querySelector('.grid3'), { ...o, pick: `${d.id} ${o.pick}` });
+}
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>

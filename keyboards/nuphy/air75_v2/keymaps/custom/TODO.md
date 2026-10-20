@@ -1,6 +1,6 @@
 # TODO
 
-- [ ] VIP next: redesign the main base (replace Mint Ripple)
+- [x] Main base redesigned: amber glow, F/J bright, soft ripples, rails 50% rising to 65% while typing
 - [x] Gaming vs work modes with distinct color schemes (Fn+G: Factorio, Valheim, off)
   - Fn+G toggles modes (switch only with no keys held)
   - Work: Caps tap Esc / hold nav layer
