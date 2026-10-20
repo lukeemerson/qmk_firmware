@@ -834,6 +834,11 @@ void rgb_test_show(void)
 }
 
 /**
+ * @brief  side_led_show_user, keymap hook drawn under the status overlays.
+ */
+__attribute__((weak)) void side_led_show_user(void) {}
+
+/**
  * @brief  side_led_show.
  */
 void side_led_show(void) {
@@ -859,6 +864,8 @@ void side_led_show(void) {
             side_off_mode_show();
             break;
     }
+
+    side_led_show_user();
 
     bat_led_show();
     sleep_sw_led_show();

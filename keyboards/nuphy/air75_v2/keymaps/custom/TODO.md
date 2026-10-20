@@ -5,3 +5,4 @@
   - Work: Caps tap Esc / hold nav layer
   - Gaming: Caps plain Esc, nav layer off
   - Each mode gets its own lighting color (NuPhy RGB/side-light driver in `ansi/`)
+  - Gaming and symbol layers: orange + hot pink mix (nav is violet, Fn is red)
