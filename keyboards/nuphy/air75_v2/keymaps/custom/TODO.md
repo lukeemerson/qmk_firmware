@@ -1,15 +1,21 @@
 # TODO
 
-- [x] Main base redesigned: amber glow, F/J bright, soft ripples, rails 50% rising to 65% while typing
-- [x] Gaming vs work modes with distinct color schemes (Fn+G: Factorio, Valheim, off)
-  - Fn+G toggles modes (switch only with no keys held)
-  - Work: Caps tap Esc / hold nav layer
-  - Gaming: Caps plain Esc, nav layer off
-  - Each mode gets its own lighting color (NuPhy RGB/side-light driver in `ansi/`)
-  - Gaming and symbol layers: orange + hot pink mix (nav is violet, Fn is red)
-- [x] Built from `lighting-mockups.html`: Layer Legend, Mod Legend, Wispr, Battery (Fn+\), WPM Heat (Fn+W), Night (Fn+N), Factorio + Valheim (Fn+G)
-- [ ] Focus Timer (not picked yet)
+## Open
 - [ ] Snippets as part of the build: one `snippets.json` source of truth
   - Generates Better Aliases `config.json`, nvim `snippets/markdown.json`, a Raycast snippet import file, and a Wispr checklist (don't write Wispr's `flow.sqlite`, it cloud-syncs)
   - QMK Leader on Right Cmd (tap Leader, hold Cmd): Leader + code fires Better Aliases "Expand Alias" via a Raycast hotkey and types the same code
   - Flagged drift: nvim `drug`/`perm` vs Wispr vault snippets, `bx`/`px` and `cs`/`ss` duplicates, `gee`/`ge3`/`ge4` and `gv3`/`gvv` labels
+- [ ] Symbol layer (lighting: orange + hot pink mix)
+- [ ] Back up `~/.config/nvim` (keyboard_lights.lua / .py only exist locally)
+- [ ] Check Zellij passes focus events (`:autocmd FocusLost * echo "lost"`)
+- [ ] Decide: WPM Heat start at dark orange instead of mint?
+- [ ] Fix: Mod Legend uses a 16-bit timer (can trigger early after ~65 s idle)
+- [ ] Maybe: Fn+G only switches with no keys held
+
+## Done
+- [x] Main base: dark orange per-key flash (75%, 500 ms fade), no background, rails 50% → 75% while typing
+- [x] Game modes on Fn+G (Factorio, Valheim), nav layer off in games
+- [x] Overlays: Layer Legend, Mod Legend, Wispr, Battery (Fn+\), WPM Heat (Fn+W)
+- [x] Bases: Night (Fn+N), Study with Anki keys (Fn+S)
+- [x] Focus timer (Fn+P, 25 min, teal, any base)
+- [x] Neovim mode lighting over Raw HID (main + unfilt configs)
