@@ -29,6 +29,11 @@ extern bool            f_wakeup_prepare;
 uint8_t uart_send_cmd(uint8_t cmd, uint8_t ack_cnt, uint8_t delayms);
 
 /**
+ * @brief  sleep_user, keymap hook run as the board goes to sleep.
+ */
+__attribute__((weak)) void sleep_user(void) {}
+
+/**
  * @brief  Sleep Handle.
  */
 void sleep_handle(void) {
@@ -43,6 +48,7 @@ void sleep_handle(void) {
     // sleep process
     if (f_goto_sleep) {
         f_goto_sleep = 0;
+        sleep_user();
 
         if(user_config.sleep_enable) {
             if (dev_info.rf_state == RF_CONNECT)

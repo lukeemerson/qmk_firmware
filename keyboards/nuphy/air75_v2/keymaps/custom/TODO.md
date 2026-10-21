@@ -10,6 +10,7 @@
 - [ ] Maybe: Fn+G only switches with no keys held
 
 ## Done
+- [x] Sleep resets to the main base (game, night, study, WPM heat, timer off)
 - [x] `~/.config/nvim` backed up to the private github.com/lukeemerson/nvim-config
 - [x] Snippets source of truth: private `~/.config/snippets` (github.com/lukeemerson/snippets) generates Better Aliases and nvim snippets plus a Wispr checklist; regenerates the leader codes on every `qmk compile`
 - [x] Right Cmd leader: tap sends Hyper+Space (Better Aliases Expand Alias), gold legend lights the keys that continue a code, `,` + code pastes

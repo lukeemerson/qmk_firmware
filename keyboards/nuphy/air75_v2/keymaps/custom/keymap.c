@@ -205,6 +205,12 @@ void keyboard_post_init_user(void) {
     rgb_matrix_sethsv_noeeprom(120, 220, rgb_matrix_get_val());
 }
 
+// board going to sleep: wake on the base lighting
+void sleep_user(void) {
+    game  = GAME_OFF;
+    night = study = wpm_heat = focus_timer = false;
+}
+
 // games turn the Caps nav layer off
 layer_state_t layer_state_set_user(layer_state_t state) {
     if (game) state &= ~((layer_state_t)1 << 5);
